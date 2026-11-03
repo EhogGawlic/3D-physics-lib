@@ -1,14 +1,7 @@
 "use strict";
-import * as vec from "./vec.js" // "JIC"
+import * as vec from "./vec.js"
 import {Obj2, Obj3} from "./obj.js"
 import {Rigid2, Rigid3} from "./rigid.js"
-
-//
-// A note: Rigidbodies are made by Claude. I do not understand rigidbodies.
-// Claude does, though. But I do understand spherical object collisions,
-// Verlet physics, how to use Stack Overflow and Wikipedia, etc.
-//
-
 export class Engine{
     constructor(options){
         this.objs = []
@@ -74,8 +67,67 @@ export class Engine{
         for (const rb of rbs){
             for (const ob of this.objs) rb.collideBall(ob)
         }
-        for (let i = 0; i < rbs.length; i++){
-            for (let j = i + 1; j < rbs.length; j++) rbs[i].collideBody(rbs[j])
+
+        if (this.dimen === 3) {
+            const dynamic = []
+            const fixed = []
+            const extents = []
+            for (let i = 0; i < rbs.length; i++) {
+                const rb = rbs[i]
+                if (rb.f) {
+                    fixed.push(i)
+                } else {
+                    dynamic.push(i)
+                    extents.push(Math.max(rb.maxX - rb.minX, rb.maxY - rb.minY, rb.maxZ - rb.minZ))
+                }
+            }
+            if (dynamic.length === 0) return
+
+            extents.sort((a, b) => a - b)
+            const cellSize = Math.max(extents[Math.floor(extents.length / 2)], 1)
+            const grid = new Map()
+            const keyFor = (x, y, z) => `${x},${y},${z}`
+
+            for (const index of dynamic) {
+                const rb = rbs[index]
+                const minX = Math.floor(rb.minX / cellSize), maxX = Math.floor(rb.maxX / cellSize)
+                const minY = Math.floor(rb.minY / cellSize), maxY = Math.floor(rb.maxY / cellSize)
+                const minZ = Math.floor(rb.minZ / cellSize), maxZ = Math.floor(rb.maxZ / cellSize)
+                for (let x = minX; x <= maxX; x++) {
+                    for (let y = minY; y <= maxY; y++) {
+                        for (let z = minZ; z <= maxZ; z++) {
+                            const key = keyFor(x, y, z)
+                            let cell = grid.get(key)
+                            if (!cell) grid.set(key, cell = [])
+                            cell.push(index)
+                        }
+                    }
+                }
+            }
+
+            const testedPairs = new Set()
+            for (const cell of grid.values()) {
+                for (let i = 0; i < cell.length; i++) {
+                    for (let j = i + 1; j < cell.length; j++) {
+                        const a = Math.min(cell[i], cell[j])
+                        const b = Math.max(cell[i], cell[j])
+                        const pairKey = `${a},${b}`
+                        if (testedPairs.has(pairKey)) continue
+                        testedPairs.add(pairKey)
+                        rbs[a].collideBody(rbs[b])
+                    }
+                }
+            }
+
+            for (const dynamicIndex of dynamic) {
+                for (const fixedIndex of fixed) {
+                    rbs[dynamicIndex].collideBody(rbs[fixedIndex])
+                }
+            }
+        } else {
+            for (let i = 0; i < rbs.length; i++) {
+                for (let j = i + 1; j < rbs.length; j++) rbs[i].collideBody(rbs[j])
+            }
         }
     }
     step(){
@@ -95,6 +147,16 @@ export class Engine{
         const body = this.dimen == 2 ? new Rigid2(options) : new Rigid3(options)
         this.rigidbodies.push(body)
         return body
+    }
+    addCompound(options){
+        return this.addRigid(options)
+    }
+    weld(a, b){
+        if (a === b) return a
+        a.weld(b)
+        const i = this.rigidbodies.indexOf(b)
+        if (i >= 0) this.rigidbodies.splice(i, 1)
+        return a
     }
     addObj(options){
         this.objs.push(this.dimen == 2 ? new Obj2(options) : new Obj3(options))

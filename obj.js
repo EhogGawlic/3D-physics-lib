@@ -73,7 +73,7 @@ export class Obj2{
 
         const urd = URD2(subVec2(b2.p, b1.p))
         const combinedRad = b1.r + b2.r
-
+        if (urd == 0) return
         if (urd < combinedRad ** 2){
             const dist = Math.sqrt(urd)
             const norm = norm2(subVec2(b2.p, b1.p))
@@ -252,6 +252,7 @@ export class Obj3{
 
         const urd = URD3(subVec3(b2.p, b1.p))
         const combinedRad = b1.r + b2.r
+        if (urd == 0) return
 
         if (urd < combinedRad ** 2){
             const dist = Math.sqrt(urd)
@@ -296,6 +297,7 @@ export class Obj3{
         }
     }
     integrate(gravity){
+        if (this.f) return
         this.a.y = gravity
         this.v=divVec32(addVec3(subVec3(this.p, this.pp), this.a), 1)
         this.pp=this.p

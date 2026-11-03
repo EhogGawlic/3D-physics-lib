@@ -13,31 +13,12 @@ function resolvePointEdge(c, wc, a, b, wab, t, nx, ny, pen) {
     b.y -= ny * k * wab * t
 }
 
-export class Rigid2 {
-    // options: verts [[x,y],...] around the shape (local coords), x, y, angle, vx, vy,
-    //          spin (rad/frame), fixed, mass (total), bounce, color
-    constructor(options) {
-        const verts = options.verts
-        const cx = options.x ?? 0, cy = options.y ?? 0
-        const ang = options.angle ?? 0
-        const spin = options.spin ?? 0
-        const vx = options.vx ?? 0, vy = options.vy ?? 0
-        const cos = Math.cos(ang), sin = Math.sin(ang)
-
-        this.f = options.fixed ?? false
-        this.color = options.color ?? "#ff8844"
-        this.pts = verts.map(([lx, ly]) => {
-            const rx = lx * cos - ly * sin
-            const ry = lx * sin + ly * cos
-            return new Obj2({
-                x: cx + rx, y: cy + ry,
-                vx: vx - spin * ry, vy: vy + spin * rx,
-                rad: 0,
-                bounce: options.bounce ?? 0,
-                fixed: this.f,
-                mass: (options.mass ?? 40) / verts.length,
-            })
-        })
+// One convex piece of a body: owns the collision geometry, not the motion.
+class Part2 {
+    // pts: this part's particles, in the same order as verts (local coords, used for setup only)
+    constructor(body, pts, verts) {
+        this.body = body
+        this.pts = pts
 
         // winding: +1 if the vertices run counter-clockwise in x-right/y-up axes
         let area2 = 0
@@ -48,27 +29,11 @@ export class Rigid2 {
         }
         this.s = area2 >= 0 ? 1 : -1
 
-        // rest shape: each vertex's offset from the centre, in the starting pose
-        let rcx = 0, rcy = 0
-        for (const q of this.pts) { rcx += q.p.x; rcy += q.p.y }
-        rcx /= this.pts.length; rcy /= this.pts.length
-        this.rest = this.pts.map(q => [q.p.x - rcx, q.p.y - rcy])
-        this.stiffness = options.stiffness ?? 1    // 1 = perfectly rigid, lower = squishy
-
         this.minX = this.minY = this.maxX = this.maxY = 0
         this.update()
     }
 
-    static box(options) {
-        const hw = (options.w ?? 40) / 2, hh = (options.h ?? 40) / 2
-        return new Rigid2({ ...options, verts: [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]] })
-    }
-
-    get center() {
-        let x = 0, y = 0
-        for (const q of this.pts) { x += q.p.x; y += q.p.y }
-        return { x: x / this.pts.length, y: y / this.pts.length }
-    }
+    get f() { return this.body.f }
 
     update() {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -81,56 +46,7 @@ export class Rigid2 {
         this.minX = minX; this.minY = minY; this.maxX = maxX; this.maxY = maxY
     }
 
-    integrate(gravity) {
-        for (const q of this.pts) q.integrate(gravity)   // Obj2.integrate skips fixed particles
-    }
-
-    collideWalls(type, ...walls) {
-        if (this.f) {
-            if (type === "square") {
-                this.update()
-                const dx = this.minX < walls[0] ? walls[0] - this.minX : this.maxX > walls[2] ? walls[2] - this.maxX : 0
-                const dy = this.minY < walls[1] ? walls[1] - this.minY : this.maxY > walls[3] ? walls[3] - this.maxY : 0
-                for (const q of this.pts) {
-                    q.p.x += dx; q.pp.x += dx
-                    q.p.y += dy; q.pp.y += dy
-                }
-                this.update()
-            }
-            return
-        }
-        for (const q of this.pts) q.collideWalls(type, ...walls)
-    }
-
-    // Shape matching: find the rotation + position that best fits the rest shape to where the
-    // vertices are now, and move every vertex to its place in that fit. It doesn't depend on the
-    // order vertices are visited, so it can't leave a consistent twist behind.
-    solveConstraints() {
-        if (this.f) return
-        const pts = this.pts, rest = this.rest, n = pts.length
-        let cx = 0, cy = 0
-        for (let i = 0; i < n; i++) { cx += pts[i].p.x; cy += pts[i].p.y }
-        cx /= n; cy /= n
-
-        let dot = 0, cross = 0
-        for (let i = 0; i < n; i++) {
-            const px = pts[i].p.x - cx, py = pts[i].p.y - cy
-            dot += rest[i][0] * px + rest[i][1] * py
-            cross += rest[i][0] * py - rest[i][1] * px
-        }
-        const ang = Math.atan2(cross, dot)
-        const c = Math.cos(ang), s = Math.sin(ang)
-        const k = this.stiffness
-        for (let i = 0; i < n; i++) {
-            const p = pts[i].p
-            const gx = cx + rest[i][0] * c - rest[i][1] * s
-            const gy = cy + rest[i][0] * s + rest[i][1] * c
-            p.x += (gx - p.x) * k
-            p.y += (gy - p.y) * k
-        }
-    }
-
-    // ball (Obj2) vs this body. Position-only (PBD) response, so contacts are inelastic.
+    // ball (Obj2) vs this part. Position-only (PBD) response, so contacts are inelastic.
     collideBall(ball) {
         const r = ball.r
         const c = ball.p
@@ -176,11 +92,6 @@ export class Rigid2 {
         const wab = this.f ? 0 : 1 / A.m
         resolvePointEdge(c, wc, A.p, B.p, wab, bt, nx, ny, pen)
     }
-
-    collideBody(other) { Rigid2.collide(this, other) }
-
-    // body vs body, separating axis test over both bodies' edge normals.
-    // The shallowest axis gives an edge on one body and the deepest vertex of the other.
     static collide(A, B) {
         if (A.f && B.f) return
         if (A.maxX < B.minX || B.maxX < A.minX || A.maxY < B.minY || B.maxY < A.minY) return
@@ -221,11 +132,6 @@ export class Rigid2 {
         const off = nx * PA.p.x + ny * PA.p.y
         const wq = Q.f ? 0 : 1 / Q.pts[0].m
         const wab = P.f ? 0 : 1 / PA.m
-
-        // Every vertex of Q that has sunk past the edge (and lies along it) is pushed out. They are
-        // all measured from the same snapshot and the edge's share is applied at the end, so the
-        // result doesn't depend on which vertex comes first (that order would tilt the pair a
-        // little each time, and without friction a tilt turns into a slow slide).
         let accA = 0, accB = 0, count = 0
         for (const vert of Q.pts) {
             const q = vert.p
@@ -259,6 +165,184 @@ export class Rigid2 {
     }
 }
 
+function boxVerts(w, h, ox, oy, angle) {
+    const hw = w / 2, hh = h / 2
+    const c = Math.cos(angle), s = Math.sin(angle)
+    return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => [ox + x * c - y * s, oy + x * s + y * c])
+}
+
+function polygonArea(verts) {
+    let a = 0
+    for (let i = 0; i < verts.length; i++) {
+        const [x1, y1] = verts[i]
+        const [x2, y2] = verts[(i + 1) % verts.length]
+        a += x1 * y2 - x2 * y1
+    }
+    return Math.abs(a) / 2
+}
+
+export class Rigid2 {
+    constructor(options) {
+        const cx = options.x ?? 0, cy = options.y ?? 0
+        const ang = options.angle ?? 0
+        const spin = options.spin ?? 0
+        const vx = options.vx ?? 0, vy = options.vy ?? 0
+        const cos = Math.cos(ang), sin = Math.sin(ang)
+
+        const specs = (options.parts ?? [{ verts: options.verts }]).map(sp =>
+            sp.verts ? sp : {
+                verts: boxVerts(sp.w ?? 40, sp.h ?? 40, sp.x ?? 0, sp.y ?? 0, sp.angle ?? 0),
+                weight: sp.weight,
+            })
+
+        this.f = options.fixed ?? false
+        this.color = options.color ?? "#ff8844"
+        this.stiffness = options.stiffness ?? 1    // 1 = perfectly rigid, lower = squishy
+
+        const totalMass = options.mass ?? 40
+        let weights = specs.map(sp => sp.weight ?? polygonArea(sp.verts))
+        let wsum = weights.reduce((a, b) => a + b, 0)
+        if (!(wsum > 0)) { weights = specs.map(() => 1); wsum = specs.length }
+
+        this.pts = []
+        this.parts = []
+        specs.forEach((sp, si) => {
+            const pm = totalMass * weights[si] / wsum / sp.verts.length
+            const pts = sp.verts.map(([lx, ly]) => new Obj2({
+                x: cx + lx * cos - ly * sin,
+                y: cy + lx * sin + ly * cos,
+                vx, vy,
+                rad: 0,
+                bounce: options.bounce ?? 0,
+                fixed: this.f,
+                mass: pm,
+            }))
+            this.pts.push(...pts)
+            this.parts.push(new Part2(this, pts, sp.verts))
+        })
+
+        this.resetRest()
+
+        if (spin !== 0) {
+            // spin about the centre of mass: add w x r to every particle's velocity
+            const com = this.com()
+            for (const q of this.pts) {
+                q.pp.x += spin * (q.p.y - com.y)
+                q.pp.y -= spin * (q.p.x - com.x)
+            }
+        }
+        this.update()
+    }
+
+    static box(options) {
+        return new Rigid2({ ...options, parts: [{ w: options.w ?? 40, h: options.h ?? 40 }] })
+    }
+
+    com() {
+        let m = 0, x = 0, y = 0
+        for (const q of this.pts) { m += q.m; x += q.m * q.p.x; y += q.m * q.p.y }
+        return { x: x / m, y: y / m }
+    }
+
+    resetRest() {
+        const pts = this.pts
+        let m = 0, x = 0, y = 0
+        for (const q of pts) { m += q.m; x += q.m * q.p.x; y += q.m * q.p.y }
+        x /= m; y /= m
+        this.mtot = m
+        this.rest = pts.map(q => [q.p.x - x, q.p.y - y])
+    }
+
+    weld(other) {
+        if (other === this) return this
+        for (const part of other.parts) { part.body = this; this.parts.push(part) }
+        this.pts = this.pts.concat(other.pts)
+        other.parts = []
+        other.pts = []
+        this.f = this.f || other.f
+        for (const q of this.pts) q.f = this.f
+        this.resetRest()
+        this.update()
+        return this
+    }
+
+    // Fixed bodies don't move. The flag has to reach every particle (they are what integrates), so it
+    // is an accessor: `body.f = true` behaves the same as passing fixed: true when the body is made.
+    get f() { return this._f }
+    set f(v) {
+        if (v === this._f) return
+        this._f = v
+        if (!this.pts) return          // called from the constructor, before the particles exist
+        for (const q of this.pts) {
+            q.f = v
+            q.pp.x = q.p.x; q.pp.y = q.p.y        // no leftover velocity when switching
+        }
+    }
+
+    get center() { return this.com() }
+
+    // bounding box of the whole body, and each part's own bounds
+    update() {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+        for (const part of this.parts) {
+            part.update()
+            if (part.minX < minX) minX = part.minX
+            if (part.minY < minY) minY = part.minY
+            if (part.maxX > maxX) maxX = part.maxX
+            if (part.maxY > maxY) maxY = part.maxY
+        }
+        this.minX = minX; this.minY = minY; this.maxX = maxX; this.maxY = maxY
+    }
+
+    integrate(gravity) {
+        for (const q of this.pts) q.integrate(gravity)   // Obj2.integrate skips fixed particles
+    }
+
+    collideWalls(type, ...walls) {
+        for (const q of this.pts) q.collideWalls(type, ...walls)
+    }
+    solveConstraints() {
+        if (this.f) return
+        const pts = this.pts, rest = this.rest, n = pts.length
+        let cx = 0, cy = 0
+        for (let i = 0; i < n; i++) { cx += pts[i].m * pts[i].p.x; cy += pts[i].m * pts[i].p.y }
+        cx /= this.mtot; cy /= this.mtot
+
+        let dot = 0, cross = 0
+        for (let i = 0; i < n; i++) {
+            const m = pts[i].m
+            const px = pts[i].p.x - cx, py = pts[i].p.y - cy
+            dot += m * (rest[i][0] * px + rest[i][1] * py)
+            cross += m * (rest[i][0] * py - rest[i][1] * px)
+        }
+        const ang = Math.atan2(cross, dot)
+        const c = Math.cos(ang), s = Math.sin(ang)
+        const k = this.stiffness
+        for (let i = 0; i < n; i++) {
+            const p = pts[i].p
+            const gx = cx + rest[i][0] * c - rest[i][1] * s
+            const gy = cy + rest[i][0] * s + rest[i][1] * c
+            p.x += (gx - p.x) * k
+            p.y += (gy - p.y) * k
+        }
+    }
+
+    // ball (Obj2) vs every part of this body
+    collideBall(ball) {
+        const r = ball.r, c = ball.p
+        if (c.x < this.minX - r || c.x > this.maxX + r || c.y < this.minY - r || c.y > this.maxY + r) return
+        for (const part of this.parts) part.collideBall(ball)
+    }
+
+    // this body vs another: every part against every part (parts of one body never collide)
+    collideBody(other) {
+        if (this.f && other.f) return
+        if (this.maxX < other.minX || other.maxX < this.minX || this.maxY < other.minY || other.maxY < this.minY) return
+        for (const a of this.parts) {
+            for (const b of other.parts) Part2.collide(a, b)
+        }
+    }
+}
 const _n = { x: 0, y: 0, z: 0, d: 0 }
 const _cp = { x: 0, y: 0, z: 0, u: 0, v: 0, w: 0 }
 const _tri = { ia: 0, ib: 0, ic: 0, u: 0, v: 0, w: 0, d2: 0 }
@@ -373,8 +457,6 @@ function faceBary(body, fi, qx, qy, qz, out) {
     out.d2 = best
 }
 
-// Pushes point c out along the unit normal n by `pen`, spreading the opposite push over the
-// three vertices a, b, d with weights u, v, w. wc / wp are inverse masses (0 = doesn't move).
 function resolvePointTri(c, wc, a, b, d, wp, u, v, w, nx, ny, nz, pen) {
     const W = wc + wp * (u * u + v * v + w * w)
     if (W <= 0) return
@@ -385,10 +467,6 @@ function resolvePointTri(c, wc, a, b, d, wp, u, v, w, nx, ny, nz, pen) {
     b.x -= nx * kv; b.y -= ny * kv; b.z -= nz * kv
     d.x -= nx * kw; d.y -= ny * kw; d.z -= nz * kw
 }
-
-// Best-fit rotation of the 3x3 matrix A (row-major), found by iterating on the quaternion q
-// (Mueller et al., "A Robust Method to Extract the Rotational Part of Deformations").
-// q is updated in place and reused next call, so it usually converges in a couple of iterations.
 function extractRotation(A, q) {
     for (let it = 0; it < 20; it++) {
         const w = q.w, x = q.x, y = q.y, z = q.z
@@ -435,36 +513,18 @@ function rotate(x, y, z, ax, ay, az) {
     return [x1, y1, z]
 }
 
-export class Rigid3 {
-    constructor(options) {
-        const verts = options.verts
-        const cx = options.x ?? 0, cy = options.y ?? 0, cz = options.z ?? 0
-        const ax = options.ax ?? 0, ay = options.ay ?? 0, az = options.az ?? 0
-        const vx = options.vx ?? 0, vy = options.vy ?? 0, vz = options.vz ?? 0
-        const wx = options.spinx ?? 0, wy = options.spiny ?? 0, wz = options.spinz ?? 0
+// One convex piece of a body: owns the collision geometry, not the motion.
+class Part3 {
+    // pts: this part's particles, in the same order as verts (local coords, used for setup only)
+    constructor(body, pts, verts, faces) {
+        this.body = body
+        this.pts = pts
 
-        this.f = options.fixed ?? false
-        this.color = options.color ?? "#ff8844"
-
-        this.pts = verts.map(([lx, ly, lz]) => {
-            const [rx, ry, rz] = rotate(lx, ly, lz, ax, ay, az)
-            return new Obj3({
-                x: cx + rx, y: cy + ry, z: cz + rz,
-                vx: vx + (wy * rz - wz * ry),
-                vy: vy + (wz * rx - wx * rz),
-                vz: vz + (wx * ry - wy * rx),
-                rad: 0,
-                bounce: options.bounce ?? 0,
-                fixed: this.f,
-                mass: (options.mass ?? 80) / verts.length,
-            })
-        })
-
-        // make every face wind so its normal (b-a)x(c-a) points away from the body centre
+        // make every face wind so its normal (b-a)x(c-a) points away from the part's centre
         let mx = 0, my = 0, mz = 0
         for (const [x, y, z] of verts) { mx += x; my += y; mz += z }
         mx /= verts.length; my /= verts.length; mz /= verts.length
-        this.faces = options.faces.map(face => {
+        this.faces = faces.map(face => {
             const f = face.slice()
             const a = verts[f[0]], b = verts[f[1]], c = verts[f[2]]
             const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2]
@@ -498,15 +558,6 @@ export class Rigid3 {
             this.edgeSets[k].push([a, b])
         }
 
-        // rest shape: each vertex's offset from the centre, in the starting pose
-        let rcx = 0, rcy = 0, rcz = 0
-        for (const q of this.pts) { rcx += q.p.x; rcy += q.p.y; rcz += q.p.z }
-        rcx /= this.pts.length; rcy /= this.pts.length; rcz /= this.pts.length
-        this.rest = this.pts.map(q => [q.p.x - rcx, q.p.y - rcy, q.p.z - rcz])
-        this.q = { w: 1, x: 0, y: 0, z: 0 }       // current orientation relative to the rest shape
-        this.stiffness = options.stiffness ?? 1    // 1 = perfectly rigid, lower = squishy
-        this._A = new Array(9).fill(0)
-
         let rad = 0
         for (const [x, y, z] of verts) rad = Math.max(rad, Math.hypot(x - mx, y - my, z - mz))
         this.tol2 = (0.03 * rad) ** 2     // how far outside a face a vertex may land and still count as touching it
@@ -516,19 +567,7 @@ export class Rigid3 {
         this.update()
     }
 
-    static box(options) {
-        const hw = (options.w ?? 40) / 2, hh = (options.h ?? 40) / 2, hd = (options.d ?? 40) / 2
-        return new Rigid3({
-            ...options,
-            verts: [
-                [-hw, -hh, -hd], [hw, -hh, -hd], [hw, hh, -hd], [-hw, hh, -hd],
-                [-hw, -hh, hd], [hw, -hh, hd], [hw, hh, hd], [-hw, hh, hd],
-            ],
-            faces: [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]],
-        })
-    }
-
-    get center() { return { x: this.cx, y: this.cy, z: this.cz } }
+    get f() { return this.body.f }
 
     // bounding box and centre, from the current positions
     update() {
@@ -551,66 +590,7 @@ export class Rigid3 {
         this.cx = sx / n; this.cy = sy / n; this.cz = sz / n
     }
 
-    integrate(gravity) {
-        if (this.f) return
-        for (const q of this.pts) q.integrate(gravity)   // Obj3.integrate skips fixed particles
-    }
-
-    collideWalls(type, ...walls) {
-        if (this.f) {
-            if (type === "square") {
-                this.update()
-                const dx = this.minX < walls[0] ? walls[0] - this.minX : this.maxX > walls[2] ? walls[2] - this.maxX : 0
-                const dy = this.minY < walls[1] ? walls[1] - this.minY : this.maxY > walls[3] ? walls[3] - this.maxY : 0
-                const dz = this.minZ < walls[4] ? walls[4] - this.minZ : this.maxZ > walls[5] ? walls[5] - this.maxZ : 0
-                for (const q of this.pts) {
-                    q.p.x += dx; q.pp.x += dx
-                    q.p.y += dy; q.pp.y += dy
-                    q.p.z += dz; q.pp.z += dz
-                }
-                this.update()
-            }
-            return
-        }
-        for (const q of this.pts) q.collideWalls(type, ...walls)
-    }
-    solveConstraints() {
-        if (this.f) return
-        const pts = this.pts, rest = this.rest, n = pts.length
-        let cx = 0, cy = 0, cz = 0
-        for (let i = 0; i < n; i++) { cx += pts[i].p.x; cy += pts[i].p.y; cz += pts[i].p.z }
-        cx /= n; cy /= n; cz /= n
-
-        // A = sum of (p - centre) * rest^T
-        const A = this._A
-        A.fill(0)
-        for (let i = 0; i < n; i++) {
-            const px = pts[i].p.x - cx, py = pts[i].p.y - cy, pz = pts[i].p.z - cz
-            const r = rest[i]
-            A[0] += px * r[0]; A[1] += px * r[1]; A[2] += px * r[2]
-            A[3] += py * r[0]; A[4] += py * r[1]; A[5] += py * r[2]
-            A[6] += pz * r[0]; A[7] += pz * r[1]; A[8] += pz * r[2]
-        }
-        const q = this.q
-        extractRotation(A, q)
-
-        const w = q.w, x = q.x, y = q.y, z = q.z
-        const r00 = 1 - 2 * (y * y + z * z), r01 = 2 * (x * y - w * z), r02 = 2 * (x * z + w * y)
-        const r10 = 2 * (x * y + w * z), r11 = 1 - 2 * (x * x + z * z), r12 = 2 * (y * z - w * x)
-        const r20 = 2 * (x * z - w * y), r21 = 2 * (y * z + w * x), r22 = 1 - 2 * (x * x + y * y)
-        const k = this.stiffness
-        for (let i = 0; i < n; i++) {
-            const r = rest[i], p = pts[i].p
-            const gx = cx + r00 * r[0] + r01 * r[1] + r02 * r[2]
-            const gy = cy + r10 * r[0] + r11 * r[1] + r12 * r[2]
-            const gz = cz + r20 * r[0] + r21 * r[1] + r22 * r[2]
-            p.x += (gx - p.x) * k
-            p.y += (gy - p.y) * k
-            p.z += (gz - p.z) * k
-        }
-    }
-
-    // ball (Obj3) vs this body. Position-only response, so contacts are inelastic.
+    // ball (Obj3) vs this part. Position-only response, so contacts are inelastic.
     collideBall(ball) {
         const r = ball.r
         const c = ball.p
@@ -663,8 +643,6 @@ export class Rigid3 {
         resolvePointTri(c, wc, pts[_tri.ia].p, pts[_tri.ib].p, pts[_tri.ic].p, wp,
             _tri.u, _tri.v, _tri.w, nx, ny, nz, pen)
     }
-
-    collideBody(other) { Rigid3.collide(this, other) }
 
     static collide(A, B) {
         if (A.f && B.f) return
@@ -728,9 +706,9 @@ export class Rigid3 {
 
         // prefer a face contact unless an edge axis is clearly shallower
         if (eSetA >= 0 && eOv < fOv * 0.95) {
-            Rigid3.resolveEdges(A, B, eSetA, eSetB, enx, eny, enz, eOv)
-        } else if (Rigid3.resolveFace(fP, fFi, fQ) === 0 && eSetA >= 0) {
-            Rigid3.resolveEdges(A, B, eSetA, eSetB, enx, eny, enz, eOv)
+            Part3.resolveEdges(A, B, eSetA, eSetB, enx, eny, enz, eOv)
+        } else if (Part3.resolveFace(fP, fFi, fQ) === 0 && eSetA >= 0) {
+            Part3.resolveEdges(A, B, eSetA, eSetB, enx, eny, enz, eOv)
         }
     }
     static resolveFace(P, fi, Q) {
@@ -803,8 +781,8 @@ export class Rigid3 {
 
     // edge-edge contact: n points from A towards B
     static resolveEdges(A, B, setA, setB, nx, ny, nz, pen) {
-        const ea = Rigid3.supportEdge(A, setA, nx, ny, nz, 1)
-        const eb = Rigid3.supportEdge(B, setB, nx, ny, nz, -1)
+        const ea = Part3.supportEdge(A, setA, nx, ny, nz, 1)
+        const eb = Part3.supportEdge(B, setB, nx, ny, nz, -1)
         const a0 = A.pts[ea[0]].p, a1 = A.pts[ea[1]].p
         const b0 = B.pts[eb[0]].p, b1 = B.pts[eb[1]].p
         closestSegSeg(a0, a1, b0, b1, _ss)
@@ -834,5 +812,238 @@ export class Rigid3 {
             if (val > best) { best = val; bestEdge = e }
         }
         return bestEdge
+    }
+}
+
+// ---------- shapes ----------
+
+const BOX_FACES = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]]
+
+// the 8 corners of a w*h*d box centred at (ox, oy, oz), rotated by ax, ay, az about its own centre
+function boxGeometry(w, h, d, ox, oy, oz, ax, ay, az) {
+    const hw = w / 2, hh = h / 2, hd = d / 2
+    const local = [
+        [-hw, -hh, -hd], [hw, -hh, -hd], [hw, hh, -hd], [-hw, hh, -hd],
+        [-hw, -hh, hd], [hw, -hh, hd], [hw, hh, hd], [-hw, hh, hd],
+    ]
+    return {
+        verts: local.map(([x, y, z]) => {
+            const [rx, ry, rz] = rotate(x, y, z, ax, ay, az)
+            return [ox + rx, oy + ry, oz + rz]
+        }),
+        faces: BOX_FACES,
+    }
+}
+
+// volume of a convex polyhedron: tetrahedra from the vertex centroid to each face triangle
+function polyhedronVolume(verts, faces) {
+    let cx = 0, cy = 0, cz = 0
+    for (const v of verts) { cx += v[0]; cy += v[1]; cz += v[2] }
+    cx /= verts.length; cy /= verts.length; cz /= verts.length
+    let vol = 0
+    for (const f of faces) {
+        for (let k = 1; k < f.length - 1; k++) {
+            const a = verts[f[0]], b = verts[f[k]], c = verts[f[k + 1]]
+            const ax = a[0] - cx, ay = a[1] - cy, az = a[2] - cz
+            const bx = b[0] - cx, by = b[1] - cy, bz = b[2] - cz
+            const dx = c[0] - cx, dy = c[1] - cy, dz = c[2] - cz
+            vol += Math.abs(ax * (by * dz - bz * dy) + ay * (bz * dx - bx * dz) + az * (bx * dy - by * dx)) / 6
+        }
+    }
+    return vol
+}
+
+export class Rigid3 {
+    constructor(options) {
+        const cx = options.x ?? 0, cy = options.y ?? 0, cz = options.z ?? 0
+        const ax = options.ax ?? 0, ay = options.ay ?? 0, az = options.az ?? 0
+        const vx = options.vx ?? 0, vy = options.vy ?? 0, vz = options.vz ?? 0
+        const wx = options.spinx ?? 0, wy = options.spiny ?? 0, wz = options.spinz ?? 0
+
+        const specs = (options.parts ?? [{ verts: options.verts, faces: options.faces }]).map(sp =>
+            sp.verts ? sp : {
+                ...boxGeometry(sp.w ?? 40, sp.h ?? 40, sp.d ?? 40, sp.x ?? 0, sp.y ?? 0, sp.z ?? 0,
+                    sp.ax ?? 0, sp.ay ?? 0, sp.az ?? 0),
+                weight: sp.weight,
+            })
+
+        this.f = options.fixed ?? false
+        this.color = options.color ?? "#ff8844"
+        this.stiffness = options.stiffness ?? 1    // 1 = perfectly rigid, lower = squishy
+
+        const totalMass = options.mass ?? 80
+        let weights = specs.map(sp => sp.weight ?? polyhedronVolume(sp.verts, sp.faces))
+        let wsum = weights.reduce((a, b) => a + b, 0)
+        if (!(wsum > 0)) { weights = specs.map(() => 1); wsum = specs.length }
+
+        this.pts = []
+        this.parts = []
+        specs.forEach((sp, si) => {
+            const pm = totalMass * weights[si] / wsum / sp.verts.length
+            const pts = sp.verts.map(([lx, ly, lz]) => {
+                const [rx, ry, rz] = rotate(lx, ly, lz, ax, ay, az)
+                return new Obj3({
+                    x: cx + rx, y: cy + ry, z: cz + rz,
+                    vx, vy, vz,
+                    rad: 0,
+                    bounce: options.bounce ?? 0,
+                    fixed: this.f,
+                    mass: pm,
+                })
+            })
+            this.pts.push(...pts)
+            this.parts.push(new Part3(this, pts, sp.verts, sp.faces))
+        })
+
+        this.resetRest()
+
+        if (wx !== 0 || wy !== 0 || wz !== 0) {
+            // spin about the centre of mass: add w x r to every particle's velocity
+            const com = this.com()
+            for (const q of this.pts) {
+                const rx = q.p.x - com.x, ry = q.p.y - com.y, rz = q.p.z - com.z
+                q.pp.x -= wy * rz - wz * ry
+                q.pp.y -= wz * rx - wx * rz
+                q.pp.z -= wx * ry - wy * rx
+            }
+        }
+        this.update()
+    }
+
+    static box(options) {
+        return new Rigid3({ ...options, parts: [{ w: options.w ?? 40, h: options.h ?? 40, d: options.d ?? 40 }] })
+    }
+
+    // mass-weighted centre of the particles, from where they are now
+    com() {
+        let m = 0, x = 0, y = 0, z = 0
+        for (const q of this.pts) { m += q.m; x += q.m * q.p.x; y += q.m * q.p.y; z += q.m * q.p.z }
+        return { x: x / m, y: y / m, z: z / m }
+    }
+
+    // Records the current pose as the rest shape. Called at creation and after a weld.
+    resetRest() {
+        const pts = this.pts
+        let m = 0, x = 0, y = 0, z = 0
+        for (const q of pts) { m += q.m; x += q.m * q.p.x; y += q.m * q.p.y; z += q.m * q.p.z }
+        x /= m; y /= m; z /= m
+        this.mtot = m
+        this.rest = pts.map(q => [q.p.x - x, q.p.y - y, q.p.z - z])
+        this.q = { w: 1, x: 0, y: 0, z: 0 }       // current orientation relative to the rest shape
+        this._A = new Array(9).fill(0)
+    }
+
+    weld(other) {
+        if (other === this) return this
+        for (const part of other.parts) { part.body = this; this.parts.push(part) }
+        this.pts = this.pts.concat(other.pts)
+        other.parts = []
+        other.pts = []
+        this.f = this.f || other.f
+        for (const q of this.pts) q.f = this.f
+        this.resetRest()
+        this.update()
+        return this
+    }
+
+    // Fixed bodies don't move. The flag has to reach every particle (they are what integrates), so it
+    // is an accessor: `body.f = true` behaves the same as passing fixed: true when the body is made.
+    get f() { return this._f }
+    set f(v) {
+        if (v === this._f) return
+        this._f = v
+        if (!this.pts) return          // called from the constructor, before the particles exist
+        for (const q of this.pts) {
+            q.f = v
+            q.pp.x = q.p.x; q.pp.y = q.p.y; q.pp.z = q.p.z   // no leftover velocity when switching
+        }
+    }
+
+    get center() { return { x: this.cx, y: this.cy, z: this.cz } }
+
+    // bounding box of the whole body, each part's own bounds, and the centre of mass
+    update() {
+        let minX = Infinity, minY = Infinity, minZ = Infinity
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+        for (const part of this.parts) {
+            part.update()
+            if (part.minX < minX) minX = part.minX
+            if (part.minY < minY) minY = part.minY
+            if (part.minZ < minZ) minZ = part.minZ
+            if (part.maxX > maxX) maxX = part.maxX
+            if (part.maxY > maxY) maxY = part.maxY
+            if (part.maxZ > maxZ) maxZ = part.maxZ
+        }
+        this.minX = minX; this.minY = minY; this.minZ = minZ
+        this.maxX = maxX; this.maxY = maxY; this.maxZ = maxZ
+        const c = this.com()
+        this.cx = c.x; this.cy = c.y; this.cz = c.z
+    }
+
+    integrate(gravity) {
+        for (const q of this.pts) q.integrate(gravity)   // Obj3.integrate skips fixed particles
+    }
+
+    collideWalls(type, ...walls) {
+        for (const q of this.pts) q.collideWalls(type, ...walls)
+    }
+    solveConstraints() {
+        if (this.f) return
+        const pts = this.pts, rest = this.rest, n = pts.length
+        let cx = 0, cy = 0, cz = 0
+        for (let i = 0; i < n; i++) {
+            const m = pts[i].m, p = pts[i].p
+            cx += m * p.x; cy += m * p.y; cz += m * p.z
+        }
+        cx /= this.mtot; cy /= this.mtot; cz /= this.mtot
+
+        // A = sum of m * (p - centre) * rest^T
+        const A = this._A
+        A.fill(0)
+        for (let i = 0; i < n; i++) {
+            const m = pts[i].m
+            const px = m * (pts[i].p.x - cx), py = m * (pts[i].p.y - cy), pz = m * (pts[i].p.z - cz)
+            const r = rest[i]
+            A[0] += px * r[0]; A[1] += px * r[1]; A[2] += px * r[2]
+            A[3] += py * r[0]; A[4] += py * r[1]; A[5] += py * r[2]
+            A[6] += pz * r[0]; A[7] += pz * r[1]; A[8] += pz * r[2]
+        }
+        const q = this.q
+        extractRotation(A, q)
+
+        const w = q.w, x = q.x, y = q.y, z = q.z
+        const r00 = 1 - 2 * (y * y + z * z), r01 = 2 * (x * y - w * z), r02 = 2 * (x * z + w * y)
+        const r10 = 2 * (x * y + w * z), r11 = 1 - 2 * (x * x + z * z), r12 = 2 * (y * z - w * x)
+        const r20 = 2 * (x * z - w * y), r21 = 2 * (y * z + w * x), r22 = 1 - 2 * (x * x + y * y)
+        const k = this.stiffness
+        for (let i = 0; i < n; i++) {
+            const r = rest[i], p = pts[i].p
+            const gx = cx + r00 * r[0] + r01 * r[1] + r02 * r[2]
+            const gy = cy + r10 * r[0] + r11 * r[1] + r12 * r[2]
+            const gz = cz + r20 * r[0] + r21 * r[1] + r22 * r[2]
+            p.x += (gx - p.x) * k
+            p.y += (gy - p.y) * k
+            p.z += (gz - p.z) * k
+        }
+    }
+
+    // ball (Obj3) vs every part of this body
+    collideBall(ball) {
+        const r = ball.r, c = ball.p
+        if (c.x < this.minX - r || c.x > this.maxX + r ||
+            c.y < this.minY - r || c.y > this.maxY + r ||
+            c.z < this.minZ - r || c.z > this.maxZ + r) return
+        for (const part of this.parts) part.collideBall(ball)
+    }
+
+    // this body vs another: every part against every part (parts of one body never collide)
+    collideBody(other) {
+        if (this.f && other.f) return
+        if (this.maxX < other.minX || other.maxX < this.minX ||
+            this.maxY < other.minY || other.maxY < this.minY ||
+            this.maxZ < other.minZ || other.maxZ < this.minZ) return
+        for (const a of this.parts) {
+            for (const b of other.parts) Part3.collide(a, b)
+        }
     }
 }
