@@ -161,4 +161,7 @@ export class Engine{
     addObj(options){
         this.objs.push(this.dimen == 2 ? new Obj2(options) : new Obj3(options))
     }
+    resizeBounds(newwalls){
+        this.walls = newwalls
+    }
 }
