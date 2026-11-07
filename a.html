@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Engine Test Bench: Rigid Bodies 3D</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        #canvas {
+            border: 2px solid #333;
+            background-color: #000;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            cursor: grab;
+        }
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        button {
+            padding: 8px 16px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007acc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #005999;
+        }
+        #info {
+            font-size: 14px;
+            color: #aaa;
+            min-width: 180px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Physics Engine Test: Rigid Bodies 3D</h1>
+    <canvas id="canvas" width="500" height="600"></canvas>
+
+    <div class="controls">
+        <button id="add-ball">Add Ball</button>
+        <button id="add-box">Add Box</button>
+        <button id="add-compound">Add Compound</button>
+        <button id="weld-pair">Weld Pair</button>
+        <span id="info"></span>
+    </div>
+    <p style="color:#888;font-size:13px">Drag to rotate</p>
+
+    <script type="module">
+        import { Engine } from './main.js'
+
+        // Container: x 0..200, y 0..400 (floor at y=400, gravity is +y), z 0..200
+        // Wall order: [left, top, right, bottom, front, back]
+        const BOX = { x0: 0, y0: 0, x1: 200, y1: 400, z0: 0, z1: 200 }
+
+        const engine = new Engine({
+            mode: 'plain',
+            dimensions: 3,
+            walltype: 'square',
+            walls: [BOX.x0, BOX.y0, BOX.x1, BOX.y1, BOX.z0, BOX.z1],
+            gravity: 0.098,
+            substeps: 8
+        })
+
+        const canvas = document.getElementById('canvas')
+        const ctx = canvas.getContext('2d')
+        const info = document.getElementById('info')
+
+        // fixed ramps: fixed: true means the box never moves, but things still collide with it
+        engine.addBox({ x: 90, y: 300, z: 100, w: 150, h: 12, d: 160, az: 0.25, fixed: true, color: '#777777' })
+        engine.addBox({ x: 110, y: 190, z: 100, w: 150, h: 12, d: 160, az: -0.25, fixed: true, color: '#777777' })
+
+        // free boxes
+        engine.addBox({ x: 60, y: 100, z: 70, w: 40, h: 30, d: 40, mass: 60, ax: 0.3, az: 0.2, color: '#ff8844' })
+        engine.addBox({ x: 140, y: 60, z: 120, w: 30, h: 30, d: 30, mass: 60, color: '#ffcc44' })
+
+        function addBall() {
+            engine.addObj({
+                x: 20 + Math.random() * 160,
+                y: 10,
+                z: 20 + Math.random() * 160,
+                rad: 9,
+                bounce: 0.3,
+            })
+        }
+
+        function addBox() {
+            engine.addBox({
+                x: 50 + Math.random() * 100,
+                y: 60,
+                z: 50 + Math.random() * 100,
+                w: 20 + Math.random() * 30,
+                h: 20 + Math.random() * 30,
+                d: 20 + Math.random() * 30,
+                ax: Math.random() * Math.PI,
+                ay: Math.random() * Math.PI,
+                az: Math.random() * Math.PI,
+                spinx: (Math.random() - 0.5) * 0.04,
+                spiny: (Math.random() - 0.5) * 0.04,
+                mass: 60,
+                color: '#ff8844',
+            })
+        }
+
+        // compound bodies: several convex parts held together rigidly (boxes here, positions
+        // are relative to the body's own origin)
+        const SHAPES = [
+            [{ w: 70, h: 20, d: 30, x: 0, y: 0, z: 0 }, { w: 20, h: 50, d: 30, x: -25, y: -35, z: 0 }],     // L
+            [{ w: 70, h: 20, d: 30, x: 0, y: 0, z: 0 }, { w: 20, h: 50, d: 30, x: 0, y: 35, z: 0 }],         // T
+            [{ w: 60, h: 18, d: 18, x: 0, y: 0, z: 0 }, { w: 18, h: 60, d: 18, x: 0, y: 0, z: 0 },
+             { w: 18, h: 18, d: 60, x: 0, y: 0, z: 0 }],                                                       // 3D cross
+        ]
+
+        function addCompound() {
+            engine.addCompound({
+                x: 60 + Math.random() * 80,
+                y: 80,
+                z: 60 + Math.random() * 80,
+                ax: Math.random() * Math.PI * 2,
+                ay: Math.random() * Math.PI * 2,
+                az: Math.random() * Math.PI * 2,
+                spinx: (Math.random() - 0.5) * 0.04,
+                spiny: (Math.random() - 0.5) * 0.04,
+                parts: SHAPES[Math.floor(Math.random() * SHAPES.length)],
+                mass: 100,
+                color: '#cc66ff',
+            })
+        }
+
+        // two separate boxes, then weld the second onto the first in the pose they have now
+        function weldPair() {
+            const x = 60 + Math.random() * 80, z = 60 + Math.random() * 80
+            const a = engine.addBox({ x, y: 60, z, w: 50, h: 20, d: 30, mass: 40, color: '#66ccff' })
+            const b = engine.addBox({ x: x + 30, y: 85, z, w: 20, h: 40, d: 30, mass: 40, color: '#66ccff' })
+            engine.weld(a, b)
+        }
+
+        for (let i = 0; i < 60; i++) {
+            engine.addObj({
+                x: 20 + (i % 6) * 30 + Math.random(),
+                y: 10 + Math.floor(i / 36) * 20,
+                z: 20 + (Math.floor(i / 6) % 6) * 30 + Math.random(),
+                rad: 9,
+                bounce: 0.3,
+            })
+        }
+
+        document.getElementById('add-ball').addEventListener('click', addBall)
+        document.getElementById('add-box').addEventListener('click', addBox)
+        document.getElementById('add-compound').addEventListener('click', addCompound)
+        document.getElementById('weld-pair').addEventListener('click', weldPair)
+
+        // ---- camera ----
+        let yaw = 0.6, pitch = 0.35
+        const FOCAL = 800, DIST = 800
+        const center = {
+            x: (BOX.x0 + BOX.x1) / 2,
+            y: (BOX.y0 + BOX.y1) / 2,
+            z: (BOX.z0 + BOX.z1) / 2,
+        }
+
+        let dragging = false, lastX = 0, lastY = 0
+        canvas.addEventListener('pointerdown', e => {
+            dragging = true; lastX = e.clientX; lastY = e.clientY
+            canvas.setPointerCapture(e.pointerId)
+            canvas.style.cursor = 'grabbing'
+        })
+        canvas.addEventListener('pointerup', () => {
+            dragging = false
+            canvas.style.cursor = 'grab'
+        })
+        canvas.addEventListener('pointermove', e => {
+            if (!dragging) return
+            yaw += (e.clientX - lastX) * 0.01
+            pitch += (e.clientY - lastY) * 0.01
+            pitch = Math.max(-1.4, Math.min(1.4, pitch))
+            lastX = e.clientX; lastY = e.clientY
+        })
+
+        // world point -> camera space {x, y, z} (z = distance in front of the camera)
+        function toCam(x, y, z) {
+            x -= center.x; y -= center.y; z -= center.z
+            const cy = Math.cos(yaw), sy = Math.sin(yaw)
+            const x1 = x * cy + z * sy
+            const z1 = -x * sy + z * cy
+            const cp = Math.cos(pitch), sp = Math.sin(pitch)
+            return {
+                x: x1,
+                y: y * cp - z1 * sp,
+                z: y * sp + z1 * cp + DIST,
+            }
+        }
+
+        function toScreen(c) {
+            const s = FOCAL / c.z
+            return { sx: canvas.width / 2 + c.x * s, sy: canvas.height / 2 + c.y * s, s }
+        }
+
+        const corners = []
+        for (const x of [BOX.x0, BOX.x1])
+            for (const y of [BOX.y0, BOX.y1])
+                for (const z of [BOX.z0, BOX.z1])
+                    corners.push([x, y, z])
+        const edges = []
+        for (let a = 0; a < 8; a++)
+            for (let b = a + 1; b < 8; b++) {
+                const diff = (a ^ b)
+                if (diff === 1 || diff === 2 || diff === 4) edges.push([a, b])
+            }
+
+        function drawContainer() {
+            const pts = corners.map(c => toScreen(toCam(...c)))
+            ctx.strokeStyle = '#555'
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            for (const [a, b] of edges) {
+                ctx.moveTo(pts[a].sx, pts[a].sy)
+                ctx.lineTo(pts[b].sx, pts[b].sy)
+            }
+            ctx.stroke()
+        }
+
+        function hexToRgb(hex) {
+            const n = parseInt(hex.slice(1), 16)
+            return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+        }
+
+        // light direction (towards the light); y is down, so negative y is up
+        const L = (() => { const l = Math.hypot(0.3, -0.8, -0.5); return [0.3 / l, -0.8 / l, -0.5 / l] })()
+
+        // one entry per ball and per visible box face; sorted far to near, then drawn
+        function collectItems() {
+            const items = []
+
+            for (const ob of engine.objs) {
+                const c = toCam(ob.p.x, ob.p.y, ob.p.z)
+                items.push({ depth: c.z, ball: ob, c })
+            }
+
+            for (const body of engine.rigidbodies) {
+                const rgb = hexToRgb(body.color)
+                for (const part of body.parts) {
+                    const cam = part.pts.map(q => toCam(q.p.x, q.p.y, q.p.z))
+                    for (const f of part.faces) {
+                        // normals come out pointing away from the part, in world space and in camera space
+                        const a = part.pts[f[0]].p, b = part.pts[f[1]].p, c = part.pts[f[2]].p
+                        let nx = (b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y)
+                        let ny = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z)
+                        let nz = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+                        const l = Math.hypot(nx, ny, nz) || 1
+                        nx /= l; ny /= l; nz /= l
+
+                        const ca = cam[f[0]], cb = cam[f[1]], cc = cam[f[2]]
+                        const cnx = (cb.y - ca.y) * (cc.z - ca.z) - (cb.z - ca.z) * (cc.y - ca.y)
+                        const cny = (cb.z - ca.z) * (cc.x - ca.x) - (cb.x - ca.x) * (cc.z - ca.z)
+                        const cnz = (cb.x - ca.x) * (cc.y - ca.y) - (cb.y - ca.y) * (cc.x - ca.x)
+                        // camera sits at the origin: a face is visible if its normal points back at us
+                        if (cnx * ca.x + cny * ca.y + cnz * ca.z >= 0) continue
+
+                        let depth = 0
+                        for (const i of f) depth += cam[i].z
+                        depth /= f.length
+
+                        const shade = 0.4 + 0.6 * Math.max(0, nx * L[0] + ny * L[1] + nz * L[2])
+                        items.push({ depth, face: f.map(i => cam[i]), rgb, shade })
+                    }
+                }
+            }
+
+            items.sort((p, q) => q.depth - p.depth)
+            return items
+        }
+
+        let frames = 0, lastT = performance.now()
+
+        function loop() {
+            engine.step()
+            engine.collideAllBalls()
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            drawContainer()
+
+            for (const it of collectItems()) {
+                if (it.ball) {
+                    const p = toScreen(it.c)
+                    // nearer balls are brighter
+                    const t = Math.max(0, Math.min(1, 1 - (it.depth - (DIST - 250)) / 500))
+                    ctx.fillStyle = `hsl(165, 100%, ${25 + t * 40}%)`
+                    ctx.beginPath()
+                    ctx.arc(p.sx, p.sy, it.ball.r * p.s, 0, Math.PI * 2)
+                    ctx.fill()
+                } else {
+                    ctx.beginPath()
+                    it.face.forEach((c, i) => {
+                        const p = toScreen(c)
+                        if (i === 0) ctx.moveTo(p.sx, p.sy)
+                        else ctx.lineTo(p.sx, p.sy)
+                    })
+                    ctx.closePath()
+                    const [r, g, b] = it.rgb
+                    ctx.fillStyle = `rgb(${Math.round(r * it.shade)}, ${Math.round(g * it.shade)}, ${Math.round(b * it.shade)})`
+                    ctx.fill()
+                    ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)'
+                    ctx.lineWidth = 1
+                    ctx.stroke()
+                }
+            }
+
+            frames++
+            const now = performance.now()
+            if (now - lastT >= 500) {
+                info.textContent = `${engine.objs.length} balls, ${engine.rigidbodies.length} boxes, ${Math.round(frames * 1000 / (now - lastT))} fps`
+                frames = 0; lastT = now
+            }
+
+            requestAnimationFrame(loop)
+        }
+
+        loop()
+    </script>
+</body>
+</html>
