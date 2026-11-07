@@ -299,6 +299,7 @@ export class Rigid2 {
     }
 
     collideWalls(type, ...walls) {
+        if (this.f) return
         for (const q of this.pts) q.collideWalls(type, ...walls)
     }
     solveConstraints() {
@@ -985,6 +986,7 @@ export class Rigid3 {
     }
 
     collideWalls(type, ...walls) {
+        if (this.f) return
         for (const q of this.pts) q.collideWalls(type, ...walls)
     }
     solveConstraints() {
