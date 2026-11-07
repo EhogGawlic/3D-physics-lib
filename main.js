@@ -3,6 +3,7 @@ import * as vec from "./vec.js"
 import {Obj2, Obj3} from "./obj.js"
 import {Rigid2, Rigid3} from "./rigid.js"
 import { Fan2, Fan3 } from "./fan.js";
+import { Tcan2, Tcan3} from "./tcan.js"
 export class Engine{
     constructor(options){
         this.objs = []
@@ -160,6 +161,13 @@ export class Engine{
             this.fans.push(nf)
         }
     }
+    addTcan(pos, size, options={}){
+        const tcan = this.dimen === 2
+            ? new Tcan2(pos, size, options.pRbIn)
+            : new Tcan3(pos, size, options.pRbIn)
+        this.tcans.push(tcan)
+        return tcan
+    }
     addBox(options){
         const body = this.dimen == 2 ? Rigid2.box(options) : Rigid3.box(options)
         this.rigidbodies.push(body)
@@ -190,6 +198,18 @@ export class Engine{
         this.objs = []
         this.rigidbodies = []
         this.fans=[]
+        this.tcans=[]
         
+    }
+    /**
+     * fans don't fit!
+     */
+    doTcans(){
+        if (this.dimen == 2){
+            return Tcan2.testAllAndDel(this.tcans, this.objs, this.rigidbodies)
+        }
+        if (this.dimen == 3){
+            return Tcan3.testAllAndDel(this.tcans, this.objs, this.rigidbodies)
+        }
     }
 }
