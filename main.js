@@ -2,6 +2,7 @@
 import * as vec from "./vec.js"
 import {Obj2, Obj3} from "./obj.js"
 import {Rigid2, Rigid3} from "./rigid.js"
+import { Fan2, Fan3 } from "./fan.js";
 export class Engine{
     constructor(options){
         this.objs = []
@@ -131,12 +132,33 @@ export class Engine{
         }
     }
     step(){
+
         this.objs.forEach(ob=>{
             ob.integrate(this.gravity)
         })
         this.rigidbodies.forEach(rb=>{
             rb.integrate(this.gravity)
         })
+        if (this.dimen == 2){
+            Fan2.applyAll(this.fans, this.objs, this.rigidbodies)
+        }
+        if (this.dimen == 3){
+            Fan3.applyAll(this.fans, this.objs, this.rigidbodies)
+        }
+    }
+    addFan(pos, dir, speed, taper, options={}){
+        if (this.dimen == 2){
+            const nf = new Fan2(
+                pos, dir, options.type ?? 0, speed, taper, options.initialRadius ?? 20
+            )
+            this.fans.push(nf)
+        }
+        if (this.dimen == 3){
+            const nf = new Fan3(
+                pos, dir, options.type ?? 0, speed, taper, options.initialRadius ?? 20
+            )
+            this.fans.push(nf)
+        }
     }
     addBox(options){
         const body = this.dimen == 2 ? Rigid2.box(options) : Rigid3.box(options)
@@ -163,5 +185,11 @@ export class Engine{
     }
     resizeBounds(newwalls){
         this.walls = newwalls
+    }
+    clear(){
+        this.objs = []
+        this.rigidbodies = []
+        this.fans=[]
+        
     }
 }
