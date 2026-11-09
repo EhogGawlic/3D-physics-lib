@@ -163,6 +163,24 @@ export class Obj2{
             }
         }
     }
+    clone() {
+        const copy = Object.create(Obj2.prototype)
+        
+        copy.p = new Vec2(this.p.x, this.p.y)
+        copy.v = new Vec2(this.v.x, this.v.y)
+        copy.a = new Vec2(this.a.x, this.a.y)
+        copy.pp = new Vec2(this.pp.x, this.pp.y)
+        copy.c = [...this.c]
+        copy.r = this.r
+        copy.bounce = this.bounce
+        copy.f = this.f
+        copy.m = this.m
+        copy.cx = this.cx
+        copy.cy = this.cy
+        copy.id = Obj2.nextId++
+        
+        return copy
+    }
 }
 
 export class Obj3{
@@ -345,5 +363,24 @@ export class Obj3{
                 }
             }
         }
+    }
+    clone() {
+        const copy = Object.create(Obj3.prototype)
+        
+        copy.p = new Vec3(this.p.x, this.p.y, this.p.z)
+        copy.v = new Vec3(this.v.x, this.v.y, this.v.z)
+        copy.a = new Vec3(this.a.x, this.a.y, this.a.z)
+        copy.pp = new Vec3(this.pp.x, this.pp.y, this.pp.z)
+        copy.c = [...this.c]
+        copy.r = this.r
+        copy.bounce = this.bounce
+        copy.f = this.f
+        copy.m = this.m
+        copy.cx = this.cx
+        copy.cy = this.cy
+        copy.cz = this.cz
+        copy.id = Obj2.nextId++
+        
+        return copy
     }
 }
