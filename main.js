@@ -4,12 +4,14 @@ import {Obj2, Obj3} from "./obj.js"
 import {Rigid2, Rigid3} from "./rigid.js"
 import { Fan2, Fan3 } from "./fan.js";
 import { Tcan2, Tcan3} from "./tcan.js"
+import { BarB2, BarB3, BarR2, BarR3} from "./joint.js"
 export {Vec2, Vec3, addVec2,addVec3,subVec2,subVec3,multVec2,multVec3,divVec2,divVec3,multVec22,multVec32,divVec22,divVec32,dist2, dist3, URD2, URD3, norm2, norm3, dot2, dot3, reflect2, reflect3} from "./vec.js"
 
 export {Obj2, Obj3} from "./obj.js"
 export {Rigid2, Rigid3} from "./rigid.js"
 export { Fan2, Fan3 } from "./fan.js";
 export { Tcan2, Tcan3} from "./tcan.js"
+export { BarB2, BarB3, BarR2, BarR3} from "./joint.js"
 export class Engine{
     constructor(options){
         this.objs = []
@@ -20,6 +22,7 @@ export class Engine{
         this.speedos = []
         this.rigidbodies = []
         this.magnets = []
+        this.bars = []
         this.mode = Object.hasOwn(options, "mode") ? options.mode : "plain"
         this.dimen = Object.hasOwn(options, "dimensions") ? options.dimensions : 2
         this.walls = Object.hasOwn(options, "walls") ? options.walls : [0,0,400,600]
@@ -40,6 +43,7 @@ export class Engine{
             default:
                 if (this.dimen == 2){
                     for (let i =0; i < this.substeps; i++){
+                        this.solveBars()
                         Obj2.collideAll(this.objs)
                         this.collideRigidbodies()
                         this.objs.forEach(ob=>{
@@ -49,12 +53,13 @@ export class Engine{
                             rb.collideWalls(this.wtype,...this.walls)
                             rb.solveConstraints()
                         })
+                        
                     }
                 }
 
                 if (this.dimen == 3){
                     for (let i =0; i < this.substeps; i++){
-
+                        this.solveBars()
                         Obj3.collideAll(this.objs)
                         this.collideRigidbodies()
                         this.objs.forEach(ob=>{
@@ -69,7 +74,6 @@ export class Engine{
         }
     }
     collideRigidbodies(){
-        const rbs = this.rigidbodies
         if (rbs.length === 0) return
         for (const rb of rbs) rb.update()
         for (const rb of rbs){
@@ -77,61 +81,7 @@ export class Engine{
         }
 
         if (this.dimen === 3) {
-            const dynamic = []
-            const fixed = []
-            const extents = []
-            for (let i = 0; i < rbs.length; i++) {
-                const rb = rbs[i]
-                if (rb.f) {
-                    fixed.push(i)
-                } else {
-                    dynamic.push(i)
-                    extents.push(Math.max(rb.maxX - rb.minX, rb.maxY - rb.minY, rb.maxZ - rb.minZ))
-                }
-            }
-            if (dynamic.length === 0) return
-
-            extents.sort((a, b) => a - b)
-            const cellSize = Math.max(extents[Math.floor(extents.length / 2)], 1)
-            const grid = new Map()
-            const keyFor = (x, y, z) => `${x},${y},${z}`
-
-            for (const index of dynamic) {
-                const rb = rbs[index]
-                const minX = Math.floor(rb.minX / cellSize), maxX = Math.floor(rb.maxX / cellSize)
-                const minY = Math.floor(rb.minY / cellSize), maxY = Math.floor(rb.maxY / cellSize)
-                const minZ = Math.floor(rb.minZ / cellSize), maxZ = Math.floor(rb.maxZ / cellSize)
-                for (let x = minX; x <= maxX; x++) {
-                    for (let y = minY; y <= maxY; y++) {
-                        for (let z = minZ; z <= maxZ; z++) {
-                            const key = keyFor(x, y, z)
-                            let cell = grid.get(key)
-                            if (!cell) grid.set(key, cell = [])
-                            cell.push(index)
-                        }
-                    }
-                }
-            }
-
-            const testedPairs = new Set()
-            for (const cell of grid.values()) {
-                for (let i = 0; i < cell.length; i++) {
-                    for (let j = i + 1; j < cell.length; j++) {
-                        const a = Math.min(cell[i], cell[j])
-                        const b = Math.max(cell[i], cell[j])
-                        const pairKey = `${a},${b}`
-                        if (testedPairs.has(pairKey)) continue
-                        testedPairs.add(pairKey)
-                        rbs[a].collideBody(rbs[b])
-                    }
-                }
-            }
-
-            for (const dynamicIndex of dynamic) {
-                for (const fixedIndex of fixed) {
-                    rbs[dynamicIndex].collideBody(rbs[fixedIndex])
-                }
-            }
+            Rigid3.solveAll(this)
         } else {
             for (let i = 0; i < rbs.length; i++) {
                 for (let j = i + 1; j < rbs.length; j++) rbs[i].collideBody(rbs[j])
@@ -208,8 +158,14 @@ export class Engine{
         
     }
     /**
-     * fans don't fit!
+     * fans don't fit! 
+     * LATER ME: what
      */
+    solveBars(){
+        this.bars.forEach(bar=>{
+            bar.solve()
+        })
+    }
     doTcans(){
         if (this.dimen == 2){
             return Tcan2.testAllAndDel(this.tcans, this.objs, this.rigidbodies)
