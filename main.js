@@ -74,6 +74,7 @@ export class Engine{
         }
     }
     collideRigidbodies(){
+        const rbs = this.rigidbodies
         if (rbs.length === 0) return
         for (const rb of rbs) rb.update()
         for (const rb of rbs){
