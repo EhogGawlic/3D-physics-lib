@@ -2,6 +2,8 @@ import {Vec2, Vec3, addVec2,addVec3,subVec2,subVec3,multVec2,multVec3,divVec2,di
 
 import { Rigid2, Rigid3 } from "./rigid.js"
 import { Obj2, Obj3 } from "./obj.js"
+
+
 export class BarB2 {
     constructor(b1, b2, len, stiffness = 1) {
         this.b1 = b1

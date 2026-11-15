@@ -120,7 +120,7 @@ export class Obj2{
     integrate(gravity){
         if (this.f) return
         this.a.y = gravity
-        this.v=divVec22(addVec2(subVec2(this.p, this.pp), this.a), 1)
+        this.v=divVec22(addVec2(subVec2(this.p, this.pp), this.a), 1.01)
         this.pp=this.p
         this.p = addVec2(this.p, this.v)
     }
