@@ -41,7 +41,19 @@ export class Cloth{
                         this.joints.push(new BarB3(pt, this.points[index - w * h], sep, stiff))
                     }
                     if (x > 0 && z > 0){
-                        this.joints.push(new BarB3(pt, this.points[index - w * h] - 1, sep, stiff))
+                        this.joints.push(new BarB3(pt, this.points[index - w * h - 1], sep*Math.SQRT2, stiff))
+                    }
+                    if (x < w - 1 && z > 0) {
+                        this.joints.push(new BarB3(pt, this.points[index - w * h + 1], sep*Math.SQRT2, stiff));
+                    }
+                    const bendSep = sep * 2;
+                    const bendStiff = stiff * 0.2;
+
+                    if (x > 1) {
+                        this.joints.push(new BarB3(pt, this.points[index - 2], bendSep, bendStiff));
+                    }
+                    if (z > 1) {
+                        this.joints.push(new BarB3(pt, this.points[index - 2 * w * h], bendSep, bendStiff));
                     }
                 }
             }
