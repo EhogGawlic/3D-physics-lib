@@ -40,6 +40,9 @@ export class Cloth{
                     if (z > 0) {
                         this.joints.push(new BarB3(pt, this.points[index - w * h], sep, stiff))
                     }
+                    if (x > 0 && z > 0){
+                        this.joints.push(new BarB3(pt, this.points[index - w * h] - 1, sep, stiff))
+                    }
                 }
             }
         }
