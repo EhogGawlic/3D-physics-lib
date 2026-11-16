@@ -5,6 +5,7 @@ import {Rigid2, Rigid3} from "./rigid.js"
 import { Fan2, Fan3 } from "./fan.js";
 import { Tcan2, Tcan3} from "./tcan.js"
 import { BarB2, BarB3, BarR2, BarR3} from "./joint.js"
+import { Cloth } from "./cloth.js"
 export {Vec2, Vec3, addVec2,addVec3,subVec2,subVec3,multVec2,multVec3,divVec2,divVec3,multVec22,multVec32,divVec22,divVec32,dist2, dist3, URD2, URD3, norm2, norm3, dot2, dot3, reflect2, reflect3} from "./vec.js"
 
 export {Obj2, Obj3} from "./obj.js"
@@ -12,6 +13,7 @@ export {Rigid2, Rigid3} from "./rigid.js"
 export { Fan2, Fan3 } from "./fan.js";
 export { Tcan2, Tcan3} from "./tcan.js"
 export { BarB2, BarB3, BarR2, BarR3} from "./joint.js"
+export { Cloth } from "./cloth.js"
 export class Engine{
     constructor(options){
         this.objs = []
@@ -21,6 +23,7 @@ export class Engine{
         this.tcans = []
         this.speedos = []
         this.rigidbodies = []
+        this.cloths = []
         this.magnets = []
         this.bars = []
         this.mode = Object.hasOwn(options, "mode") ? options.mode : "plain"
@@ -60,10 +63,19 @@ export class Engine{
                 if (this.dimen == 3){
                     for (let i =0; i < this.substeps; i++){
                         this.solveBars()
+                        this.cloths.forEach(cloth => cloth.solve())
                         Obj3.collideAll(this.objs)
+                        for (const cloth of this.cloths) {
+                            for (const point of cloth.points) {
+                                for (const obj of this.objs) Obj3.collideBalls(point, obj)
+                            }
+                        }
                         this.collideRigidbodies()
                         this.objs.forEach(ob=>{
                             ob.collideWalls(this.wtype,...this.walls)
+                        })
+                        this.cloths.forEach(cloth => {
+                            cloth.points.forEach(point => point.collideWalls(this.wtype,...this.walls))
                         })
                         this.rigidbodies.forEach(rb=>{
                             rb.collideWalls(this.wtype,...this.walls)
@@ -79,6 +91,9 @@ export class Engine{
         for (const rb of rbs) rb.update()
         for (const rb of rbs){
             for (const ob of this.objs) rb.collideBall(ob)
+            for (const cloth of this.cloths) {
+                for (const point of cloth.points) rb.collideBall(point)
+            }
         }
 
         if (this.dimen === 3) {
@@ -97,6 +112,7 @@ export class Engine{
         this.rigidbodies.forEach(rb=>{
             rb.integrate(this.gravity)
         })
+        this.cloths.forEach(cloth => cloth.integrate(this.gravity))
         if (this.dimen == 2){
             Fan2.applyAll(this.fans, this.objs, this.rigidbodies)
         }
@@ -135,6 +151,12 @@ export class Engine{
         this.rigidbodies.push(body)
         return body
     }
+    addCloth(options){
+        if (this.dimen !== 3) throw new Error("Cloth requires a 3D engine")
+        const cloth = new Cloth(options)
+        this.cloths.push(cloth)
+        return cloth
+    }
     addCompound(options){
         return this.addRigid(options)
     }
@@ -154,6 +176,7 @@ export class Engine{
     clear(){
         this.objs = []
         this.rigidbodies = []
+        this.cloths = []
         this.fans=[]
         this.tcans=[]
         

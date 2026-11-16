@@ -74,7 +74,7 @@ class Part2 {
             const dy = c.y - (A.y + ey * t)
             const d2 = dx * dx + dy * dy
             if (d2 < bestD2) { bestD2 = d2; bi = i; bt = t; bdx = dx; bdy = dy }
-            // outward normal of this edge is s * (ey, -ex); the centre is outside if it's on that side
+            // outward normal of this edge is s * (ey, -ex); the center is outside if it's on that side
             if (this.s * ((c.x - A.x) * ey - (c.y - A.y) * ex) > 0) inside = false
         }
 
@@ -84,7 +84,7 @@ class Part2 {
         const A = pts[bi], B = pts[(bi + 1) % n]
         let nx, ny, pen
         if (inside) {
-            // centre is inside the shape: leave through the nearest edge
+            // center is inside the shape: leave through the nearest edge
             const ex = B.p.x - A.p.x, ey = B.p.y - A.p.y
             const l = Math.hypot(ex, ey)
             nx = this.s * ey / l
@@ -232,7 +232,7 @@ export class Rigid2 {
         this.resetRest()
 
         if (spin !== 0) {
-            // spin about the centre of mass: add w x r to every particle's velocity
+            // spin about the center of mass: add w x r to every particle's velocity
             const com = this.com()
             for (const q of this.pts) {
                 q.pp.x += spin * (q.p.y - com.y)
@@ -537,7 +537,7 @@ class Part3 {
         this.body = body
         this.pts = pts
 
-        // make every face wind so its normal (b-a)x(c-a) points away from the part's centre
+        // make every face wind so its normal (b-a)x(c-a) points away from the part's center
         let mx = 0, my = 0, mz = 0
         for (const [x, y, z] of verts) { mx += x; my += y; mz += z }
         mx /= verts.length; my /= verts.length; mz /= verts.length
@@ -596,7 +596,7 @@ class Part3 {
 
     get f() { return this.body.f }
 
-    // bounding box and centre, from the current positions
+    // bounding box and center, from the current positions
     update() {
         let minX = Infinity, minY = Infinity, minZ = Infinity
         let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
@@ -628,7 +628,7 @@ class Part3 {
 
         const faces = this.faces, pts = this.pts
 
-        // plane test: if the centre is further than r outside any face plane, there's no contact
+        // plane test: if the center is further than r outside any face plane, there's no contact
         let inFace = -1, inD = -Infinity, inx = 0, iny = 0, inz = 0
         for (let fi = 0; fi < faces.length; fi++) {
             faceNormal(this, fi, _n)
@@ -639,12 +639,12 @@ class Part3 {
 
         let nx, ny, nz, pen
         if (inD <= 0) {
-            // centre is inside the body: leave through the nearest face
+            // center is inside the body: leave through the nearest face
             nx = inx; ny = iny; nz = inz
             pen = r - inD
             faceBary(this, inFace, c.x - inD * nx, c.y - inD * ny, c.z - inD * nz, _tri)
         } else {
-            // centre is outside: find the nearest point on the surface
+            // center is outside: find the nearest point on the surface
             let best = Infinity, bdx = 0, bdy = 0, bdz = 0
             for (let fi = 0; fi < faces.length; fi++) {
                 const f = faces[fi]
@@ -846,7 +846,7 @@ class Part3 {
 
 const BOX_FACES = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [3, 2, 6, 7], [0, 3, 7, 4], [1, 2, 6, 5]]
 
-// the 8 corners of a w*h*d box centred at (ox, oy, oz), rotated by ax, ay, az about its own centre
+// the 8 corners of a w*h*d box centerd at (ox, oy, oz), rotated by ax, ay, az about its own center
 function boxGeometry(w, h, d, ox, oy, oz, ax, ay, az) {
     const hw = w / 2, hh = h / 2, hd = d / 2
     const local = [
@@ -925,7 +925,7 @@ export class Rigid3 {
         this.resetRest()
 
         if (wx !== 0 || wy !== 0 || wz !== 0) {
-            // spin about the centre of mass: add w x r to every particle's velocity
+            // spin about the center of mass: add w x r to every particle's velocity
             const com = this.com()
             for (const q of this.pts) {
                 const rx = q.p.x - com.x, ry = q.p.y - com.y, rz = q.p.z - com.z
@@ -953,7 +953,7 @@ export class Rigid3 {
         return copy
     }
 
-    // mass-weighted centre of the particles, from where they are now
+    // mass-weighted center of the particles, from where they are now
     com() {
         let m = 0, x = 0, y = 0, z = 0
         for (const q of this.pts) { m += q.m; x += q.m * q.p.x; y += q.m * q.p.y; z += q.m * q.p.z }
@@ -1000,7 +1000,7 @@ export class Rigid3 {
 
     get center() { return { x: this.cx, y: this.cy, z: this.cz } }
 
-    // bounding box of the whole body, each part's own bounds, and the centre of mass
+    // bounding box of the whole body, each part's own bounds, and the center of mass
     update() {
         let minX = Infinity, minY = Infinity, minZ = Infinity
         let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
@@ -1037,7 +1037,7 @@ export class Rigid3 {
         }
         cx /= this.mtot; cy /= this.mtot; cz /= this.mtot
 
-        // A = sum of m * (p - centre) * rest^T
+        // A = sum of m * (p - center) * rest^T
         const A = this._A
         A.fill(0)
         for (let i = 0; i < n; i++) {
